@@ -19,8 +19,8 @@ def mask_center(mask: np.ndarray) -> np.ndarray:
     return ysx.mean(axis=0).astype(np.float32)
 
 _DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-_MODEL_PARTS  = YOLO("yolo11-coco-parts/v11-ver1/weights/best.pt").to(_DEVICE)
-_MODEL_DAMAGE = YOLO("yolo11-seg/train-yolo11s-dataset-merged2/weights/best.pt").to(_DEVICE)
+_MODEL_PARTS  = YOLO("model/parts/best.pt").to(_DEVICE)
+_MODEL_DAMAGE = YOLO("model/damage/best.pt").to(_DEVICE)
 _PARTS_NAMES  = _MODEL_PARTS.names
 _DAMAGE_NAMES = _MODEL_DAMAGE.names
 
