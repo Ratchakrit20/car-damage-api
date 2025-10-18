@@ -8,7 +8,7 @@ import io
 import torch
 
 
-from predetect import count_damage_instances
+# from predetect import count_damage_instances
 from predict2 import analyze_damage_parts
 
 
