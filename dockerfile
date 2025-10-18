@@ -7,7 +7,10 @@ WORKDIR /app
 # ---- Copy all project files ----
 COPY . /app
 
-# ---- Install dependencies ----
+# ---- Install system dependencies ----
+RUN apt-get update && apt-get install -y libgl1 libglib2.0-0
+
+# ---- Install Python dependencies ----
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ---- Expose Hugging Face default port ----
