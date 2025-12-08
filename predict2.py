@@ -21,6 +21,7 @@ def mask_center(mask: np.ndarray) -> np.ndarray:
 _DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 _MODEL_PARTS  = YOLO("model/parts/best.pt").to(_DEVICE)
 _MODEL_DAMAGE = YOLO("model/damage/best.pt").to(_DEVICE)
+_MODEL_DAMAGE_PPC = YOLO("model/damage/ppc/best.pt").to(_DEVICE)
 _PARTS_NAMES  = _MODEL_PARTS.names
 _DAMAGE_NAMES = _MODEL_DAMAGE.names
 
@@ -39,7 +40,8 @@ def analyze_damage_parts(
     prox_dx_unmatched: float = 200.0,      # หรือ |dx| < ค่านี้
     prox_dy_unmatched: float = 250.0,      # และ |dy| < ค่านี้
     max_classes_per_part: int = 0,         # 0=ส่งทุกชนิด, 1=ส่งเฉพาะชนิดที่เด่นสุด
-    render_overlay: bool = False
+    render_overlay: bool = False,
+    preprocess: bool = False
 ) -> Dict[str, Any]:
 
     """
@@ -48,7 +50,6 @@ def analyze_damage_parts(
       - รวมความเสียหายชนิดเดียวกันที่อยู่ใกล้/ทับกันใน part เดียวกัน
       - คิด coverage ของแต่ละคลาสและ coverage รวมทุกคลาสต่อชิ้นส่วน
       - สร้าง Virtual Part สำหรับ damage ที่ไม่ทับ part ใดเลย (cluster ด้วย IoU/ระยะ)
-
     return:
       {
         ok, width, height,
@@ -95,11 +96,18 @@ def analyze_damage_parts(
             conf=conf_parts,
             iou=0.5,
         )[0]
-        damage_result = _MODEL_DAMAGE.predict(
-            source=np_image,
-            imgsz=imgsz,
-            conf=conf_damage,   # ลอง 0.15 ถ้าของ test ใช้ 0.15
-        )[0]
+        if preprocess:
+            damage_result = _MODEL_DAMAGE_PPC.predict(
+                source=np_image,
+                imgsz=imgsz,
+                conf=conf_damage,   # ลอง 0.15 ถ้าของ test ใช้ 0.15
+            )[0]
+        else:
+            damage_result = _MODEL_DAMAGE.predict(
+                source=np_image,
+                imgsz=imgsz,
+                conf=conf_damage,   # ลอง 0.15 ถ้าของ test ใช้ 0.15
+            )[0]
 
     # damage_result.show()  # ดูผลคร่าว ๆ
     # parts_result.show()   # ดูผลคร่าว ๆ
@@ -137,6 +145,38 @@ def analyze_damage_parts(
         # cluster = {"union": bool mask (ของคลัสเตอร์), "conf_max": float, "count": int, "center": (y,x)}
         per_class: Dict[str, List[Dict[str, Any]]] = {}
 
+        VALID_PARTS_FOR_DAMAGE = {
+            # ❖ กระจกแตก มักเกิดกับชิ้นส่วนที่เป็นกระจกหรือครอบกระจก
+            "glass_shatter": [ 
+                "Front-window",      # กระจกข้างหน้า (ด้านหน้า)
+                "Back-window",       # กระจกข้างหลัง
+                "Windshield",        # กระจกบังลมหน้า
+                "Back-windshield",   # กระจกบังลมหลัง
+                "Mirror",            # กระจกมองข้าง
+                "Headlight",         # โคมไฟหน้า (อาจแตกได้เพราะเป็นเลนส์ใส)
+                "Tail-light"         # โคมไฟท้าย (วัสดุคล้ายกระจก)
+            ],
+
+            # ❖ ไฟแตก จะเกิดเฉพาะบริเวณที่มีหลอดไฟ/โคมไฟ
+            "lamp_broken": [
+                "Headlight",
+                "Tail-light",
+                # "Front-bumper",      # บางรุ่นมีไฟตัดหมอกในกันชนหน้า
+                # "Back-bumper",       # บางรุ่นมีไฟถอยในกันชนหลัง
+                # "Grille",            # บางรุ่นมีไฟ DRL/ambient ในกระจังหน้า
+                # "Fender",            # ไฟเลี้ยวข้างอยู่บริเวณบังโคลน
+                # "Mirror"             # บางรุ่นมีไฟเลี้ยวในกระจกมองข้าง
+            ],
+
+            # ❖ ยางแบน จะเกิดเฉพาะบริเวณล้อหรือตัวถังรอบล้อ
+            "tire_flat": [
+                "Front-wheel",
+                "Back-wheel",
+                # "Fender",            # โค้งบังล้อ
+                # "Quarter-panel",     # ตัวถังส่วนหลังของล้อ
+                # "Rocker-panel"       # คานล่างตัวถังติดกับล้อ
+            ],
+        }
         # ---------- 3) เดินทุก damage แล้วตัดสินว่า “ทับ part พอไหม” ----------
         for j, damage_box in enumerate(damage_result.boxes):
             if j >= damage_masks.shape[0]:
@@ -146,6 +186,10 @@ def analyze_damage_parts(
             damage_name = _DAMAGE_NAMES[damage_cls]
             confidence  = float(damage_box.conf.item())
 
+                # ✅ ตรวจสอบ whitelist ก่อนจับคู่
+            if damage_name in VALID_PARTS_FOR_DAMAGE:
+                if part_name not in VALID_PARTS_FOR_DAMAGE[damage_name]:
+                    continue
             dmask_real  = damage_masks[j]      # mask จริง ใช้คำนวณพื้นที่
             dmask_match = dmask_real
 
